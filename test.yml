@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PCT 부품원가계산서 작업관리</title>
+<meta name="description" content="부품원가계산서(PCT) 작업의 요청 → 수행 → 산출물 제출 → 검토/수정 → 완료 전 과정을 한 화면에서 관리하고, 흩어진 옛 산출물을 파일명만으로 정리하는 웹 시스템">
+<link rel="stylesheet" href="css/style.css">
+<!-- 공통 디자인 시스템. 반드시 기존 CSS 뒤에 온다 —
+     특정도가 같으면 나중에 온 쪽이 이기므로 순서가 곧 우선순위다. -->
+<link rel="stylesheet" href="css/hd-theme.css">
+<!-- === HD:META:BEGIN === -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://aebonlee.github.io/hd-project12/">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HD 생성형 AI 업무자동화 전문가과정">
+<meta property="og:url" content="https://aebonlee.github.io/hd-project12/">
+<meta property="og:title" content="PCT 부품원가계산서 작업관리 — HD 생성형 AI 업무자동화 전문가과정">
+<meta property="og:description" content="요청 → 수행 → 산출물 제출 → 검토/수정 → 완료를 한 시스템으로. 흩어진 옛 원가계산서는 파일명만으로 일자·품번을 찾아 정리합니다.">
+<meta property="og:locale" content="ko_KR">
+<meta name="twitter:card" content="summary_large_image">
+<!-- === HD:META:END === -->
+</head>
+<body class="hd hd-app">
+
+<div class="shell">
+
+  <!-- ============================ 사이드바 ============================ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark">PCT</span>
+      <span class="brand-text">
+        <b>건설기계 표준부품<br>원가계산서</b>
+        <small>작업 요청 · 수행 · 일정 관리</small>
+      </span>
+    </div>
+
+    <nav class="side-nav" id="sideNav" aria-label="주요 메뉴">
+      <div class="nav-group">MAIN</div>
+      <button type="button" class="nav-item active" data-view="dashboard">대시보드</button>
+
+      <div class="nav-group">작업 관리</div>
+      <button type="button" class="nav-item" data-view="requests">작업 요청 관리</button>
+      <button type="button" class="nav-item" data-view="work">작업 수행 관리</button>
+
+      <div class="nav-group">파일 관리</div>
+      <button type="button" class="nav-item" data-view="files">산출물 관리</button>
+      <button type="button" class="nav-item" data-view="review">검토 / 수정 관리</button>
+      <button type="button" class="nav-item" data-view="db">Database 관리</button>
+
+      <div class="nav-group">사용자 / 권한</div>
+      <button type="button" class="nav-item" data-view="users">사용자 · 권한 관리</button>
+    </nav>
+
+    <div class="side-foot">
+      <div class="who">
+        <span class="who-label">현재 로그인 역할</span>
+        <b id="whoName">한지혜</b>
+        <span class="who-role" id="whoRole">작업 요청자</span>
+      </div>
+      <label class="who-switch">
+        <span>계정 전환 (데모)</span>
+        <select id="userSwitch"></select>
+      </label>
+      <button type="button" class="btn small ghost" id="btnReset">데모 데이터 초기화</button>
+    </div>
+  </aside>
+
+  <!-- ============================ 본문 ============================ -->
+  <div class="content">
+
+    <div class="appbar">
+      <div class="appbar-title">
+        <h1 id="viewTitle">대시보드</h1>
+        <p class="sub" id="viewSub">부품원가계산서 작업 전체 현황</p>
+      </div>
+      <div class="appbar-right">
+        <span class="pill badge-warn" id="chipOverdue">지연 0건</span>
+        <span class="pill info" id="chipPending">가입 승인 대기 0건</span>
+        <span class="mode-chip" id="modeChip">데모 모드</span>
+      </div>
+    </div>
+
+    <div class="demo-banner">
+      <b>샘플 데이터입니다.</b>
+      품번·품명·모델명은 건설기계 부품 체계를 흉내 낸 것이고, 사람 이름과 업체는 전부 가공입니다.
+      사내 실데이터는 이 저장소에 들어 있지 않습니다.
+      <b>업로드한 파일은 이름·크기만 기록되고 본문은 어디에도 저장되지 않습니다.</b>
+    </div>
+
+    <!-- ======================= 대시보드 ======================= -->
+    <main class="view" id="view-dashboard">
+      <div class="kpi-grid" id="kpiRow"></div>
+
+      <div class="grid-3">
+        <section class="card">
+          <h3>전체 작업 진행 현황 <span class="sub" id="donutSub"></span></h3>
+          <div class="donut-wrap">
+            <div id="donut"></div>
+            <ul class="legend" id="donutLegend"></ul>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>월별 완료 추이
+            <label class="inline-ctl">
+              <select id="trendRange">
+                <option value="6" selected>6개월</option>
+                <option value="12">12개월</option>
+              </select>
+            </label>
+          </h3>
+          <div id="trend" class="chart"></div>
+          <p class="note">완료 처리한 날(closed) 기준입니다. 요청일이 아니라 실제로 닫힌 날을 셉니다.</p>
+        </section>
+
+        <section class="card">
+          <h3>오늘의 일정</h3>
+          <div id="todayList" class="today-list"></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h3>업무 프로세스 5단계</h3>
+        <ol class="process" id="process"></ol>
+        <p class="note">각 단계는 한 칸씩만 움직입니다. 요청에서 완료로 건너뛸 수 없고,
+          산출물이 없으면 검토로 넘어가지 않습니다 — 화면이 아니라 규칙이 막습니다.</p>
+      </section>
+
+      <div class="grid-2">
+        <section class="card">
+          <h3>최근 작업 요청 목록
+            <button type="button" class="btn small" data-goto="requests">전체 보기</button>
+          </h3>
+          <div class="tablewrap"><table class="tbl" id="recentTable"></table></div>
+        </section>
+
+        <section class="card">
+          <h3>오늘 완료 예정 · 지연 작업</h3>
+          <div class="tablewrap"><table class="tbl" id="dueTable"></table></div>
+        </section>
+      </div>
+
+      <section class="card">
+        <h3>빠른 작업</h3>
+        <div class="quick" id="quick"></div>
+      </section>
+
+      <section class="card">
+        <h3>최근 활동</h3>
+        <div class="tablewrap"><table class="tbl" id="logTable"></table></div>
+      </section>
+    </main>
+
+    <!-- ======================= 작업 요청 관리 ======================= -->
+    <main class="view hidden" id="view-requests">
+      <section class="card" id="newRequestCard">
+        <h3>신규 작업 요청 등록</h3>
+        <form id="reqForm" class="form-grid" autocomplete="off">
+          <label>품번<input type="text" name="partNo" placeholder="123456-100001" required></label>
+          <label>품명<input type="text" name="partName" placeholder="붐 실린더 브라켓" required></label>
+          <label>모델명<input type="text" name="model" placeholder="HX220L" required></label>
+          <label>요청일<input type="date" name="requestedAt" required></label>
+          <label>희망완료일<input type="date" name="dueDate" required></label>
+          <label>요청자 메일<input type="email" name="requesterEmail" placeholder="name@hd.example.com" required></label>
+          <label>수행자 배정 (선택)<select name="assigneeId"></select></label>
+          <label class="wide">비고<input type="text" name="note" placeholder="설계 변경(REV.B) 반영 필요 등"></label>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">요청 등록</button>
+            <button type="reset" class="btn">지우기</button>
+            <span class="form-msg" id="reqFormMsg"></span>
+          </div>
+        </form>
+        <ul class="err-list hidden" id="reqErrors"></ul>
+      </section>
+
+      <section class="card">
+        <h3>작업 요청 목록 <span class="sub" id="reqCount"></span></h3>
+        <div class="filters" id="reqFilters">
+          <label>검색<input type="search" id="fReqKeyword" placeholder="품번 · 품명 · 요청번호"></label>
+          <label>상태<select id="fReqStatus"><option value="">전체</option></select></label>
+          <label>모델<select id="fReqModel"><option value="">전체</option></select></label>
+          <label>수행자<select id="fReqAssignee"><option value="">전체</option></select></label>
+          <label>요청일 부터<input type="date" id="fReqFrom"></label>
+          <label>까지<input type="date" id="fReqTo"></label>
+          <button type="button" class="btn small" id="fReqClear">조건 지우기</button>
+        </div>
+        <div class="tablewrap"><table class="tbl" id="reqTable"></table></div>
+        <div id="more-req"></div>
+      </section>
+    </main>
+
+    <!-- ======================= 작업 수행 관리 ======================= -->
+    <main class="view hidden" id="view-work">
+      <section class="card">
+        <h3>작업 수행 현황 <span class="sub" id="workScope"></span></h3>
+        <p class="note" id="workNote"></p>
+        <div class="filters">
+          <label>검색<input type="search" id="fWorkKeyword" placeholder="품번 · 품명"></label>
+          <label>상태<select id="fWorkStatus"><option value="">진행 중 전체</option></select></label>
+        </div>
+        <div class="tablewrap"><table class="tbl" id="workTable"></table></div>
+      </section>
+    </main>
+
+    <!-- ======================= 산출물 관리 ======================= -->
+    <main class="view hidden" id="view-files">
+      <section class="card">
+        <h3>산출물 목록 <span class="sub" id="fileCount"></span></h3>
+        <div class="filters">
+          <label>검색<input type="search" id="fFileKeyword" placeholder="파일명 · 품번 · 품명"></label>
+          <label>종류<select id="fFileKind"><option value="">전체</option><option>초안</option><option>수정본</option></select></label>
+        </div>
+        <div class="tablewrap"><table class="tbl" id="fileTable"></table></div>
+        <div id="more-file"></div>
+        <p class="note">파일 본문은 저장하지 않습니다. 이 표에 남는 것은 이름·크기·버전·올린 사람이며,
+          원본은 Teams 공유 폴더(또는 Supabase Storage)에 그대로 둡니다 — README 「용량과 권한」 참조.</p>
+      </section>
+
+      <section class="card">
+        <h3>산출물 제출 메일 이력</h3>
+        <div class="tablewrap"><table class="tbl" id="mailTable"></table></div>
+      </section>
+    </main>
+
+    <!-- ======================= 검토 / 수정 관리 ======================= -->
+    <main class="view hidden" id="view-review">
+      <section class="card hidden" id="reviewDenied">
+        <h3>접근할 수 없습니다</h3>
+        <p class="note">검토 / 수정 관리는 <b>작업 요청자</b>와 관리자만 들어올 수 있습니다.
+          외부 작업 수행자 계정으로는 열리지 않습니다. 사이드바 아래에서 계정을 바꿔 확인해 보세요.</p>
+      </section>
+      <section class="card" id="reviewPanel">
+        <h3>검토 대기 · 수정 이력 <span class="sub" id="reviewCount"></span></h3>
+        <p class="note">수행자가 올린 <b>초안</b>은 그대로 두고, 요청자의 수정본이 <b>별도 버전</b>으로 쌓입니다.
+          초안을 덮어쓰지 않으므로 "처음에 뭐였는지" 를 잃지 않습니다.</p>
+        <div class="tablewrap"><table class="tbl" id="reviewTable"></table></div>
+      </section>
+    </main>
+
+    <!-- ======================= Database 관리 ======================= -->
+    <main class="view hidden" id="view-db">
+      <section class="card">
+        <h3>옛 부품원가계산서 일괄 등록</h3>
+        <p class="note">개인 폴더·Teams 공유 폴더에 흩어져 있던 파일을 고르면
+          <b>파일명만 보고</b> 품번 · 일자 · 모델 · 버전을 읽어 냅니다.
+          <code>부품원가계산서_20150103.xlsx</code> 처럼 날짜만 있는 이름도 일자별로 찾을 수 있게 됩니다.
+          확신이 서지 않는 건은 <b>지어내지 않고</b> 확인 대상으로 남깁니다.</p>
+        <div class="row">
+          <input type="file" id="archiveFile" multiple>
+          <label class="inline-ctl">보관 위치
+            <select id="archiveSource">
+              <option>Teams 공유폴더</option><option>개인 PC</option>
+              <option>메일 첨부</option><option>외장하드</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="btnArchivePreview">파일명 해독해 보기</button>
+          <button type="button" class="btn primary hidden" id="btnArchiveCommit">이대로 등록</button>
+        </div>
+        <div id="archivePreview"></div>
+      </section>
+
+      <section class="card">
+        <h3>보관 자료 <span class="sub" id="archCount"></span></h3>
+        <div class="filters">
+          <label>검색<input type="search" id="fArchKeyword" placeholder="파일명 · 품번 · 모델"></label>
+          <label>일자 부터<input type="date" id="fArchFrom"></label>
+          <label>까지<input type="date" id="fArchTo"></label>
+          <label><input type="checkbox" id="fArchNeed"> 확인 필요만</label>
+          <button type="button" class="btn small" id="fArchClear">조건 지우기</button>
+        </div>
+        <div class="tablewrap"><table class="tbl" id="archTable"></table></div>
+        <div id="more-arch"></div>
+      </section>
+    </main>
+
+    <!-- ======================= 사용자 · 권한 관리 ======================= -->
+    <main class="view hidden" id="view-users">
+      <section class="card">
+        <h3>가입 승인 대기 <span class="sub" id="pendingCount"></span></h3>
+        <p class="note">작업 수행자는 <b>외부 인원</b>입니다. 가입만으로는 아무것도 볼 수 없고,
+          관리자가 승인해야 배정 대상이 되고 산출물을 올릴 수 있습니다.
+          승인을 거두면 진행 중이던 배정도 함께 비워집니다.</p>
+        <div class="tablewrap"><table class="tbl" id="pendingTable"></table></div>
+      </section>
+
+      <section class="card">
+        <h3>전체 사용자</h3>
+        <div class="tablewrap"><table class="tbl" id="userTable"></table></div>
+      </section>
+
+      <section class="card">
+        <h3>외부 인원 가입 신청 (데모)</h3>
+        <form id="userForm" class="form-grid" autocomplete="off">
+          <label>이름<input type="text" name="name" required></label>
+          <label>메일<input type="email" name="email" required></label>
+          <label>소속<input type="text" name="org" placeholder="협력업체명"></label>
+          <label>역할<select name="role"><option>작업 수행자</option><option>작업 요청자</option></select></label>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">가입 신청</button>
+            <span class="form-msg" id="userFormMsg"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>HD 생성형 AI 업무자동화 전문가과정 [1차수] · 수강생 프로젝트 12</span>
+      <span>기획 한지혜 · 데이터는 브라우저에만 저장됩니다</span>
+    </footer>
+  </div>
+</div>
+
+<!-- ============================ 상세 모달 ============================ -->
+<div class="modal hidden" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-back" data-close="1"></div>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="modalTitle">요청 상세</h2>
+      <button type="button" class="btn small ghost" data-close="1">닫기</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/config.js"></script>
+<script src="js/logic.js"></script>
+<script src="js/seed-data.js"></script>
+<script src="js/store.js"></script>
+<script src="js/supabase-store.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
