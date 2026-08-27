@@ -63,42 +63,57 @@
   /**
    * 서버 모드로 올라간다.
    * @param {object} injected  테스트에서 가짜 클라이언트를 넣을 때만 쓴다
+   * @param {{email:string, password:string}=} credentials  로그인 폼에서 받은 값
    * @returns {Promise<boolean>} 성공하면 true. 실패하면 예외 — app.js 가 데모로 내려간다.
    */
-  function init(injected) {
+  function init(injected, credentials) {
     var c = cfg();
-    if (injected) { sb = injected; return signIn().then(loadAll).then(function () { return true; }); }
+    if (injected) { sb = injected; return signIn(credentials).then(loadAll).then(function () { return true; }); }
     if (!c.USE_SUPABASE) return Promise.resolve(false);
     if (!c.SUPABASE_URL || !c.SUPABASE_ANON_KEY)
       return Promise.reject(new Error('config.js 에 SUPABASE_URL / SUPABASE_ANON_KEY 를 채우세요'));
 
     return loadSdk().then(function () {
       sb = root.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON_KEY);
-      return signIn();
+      return signIn(credentials);
     }).then(loadAll).then(function () { return true; });
   }
 
   /**
-   * 로그인. 이미 세션이 있으면 그대로 쓰고, 없으면 물어본다.
+   * 로그인. 이미 세션이 있으면 그대로 쓴다.
    *
    * RLS 정책이 전부 `to authenticated` 라 비로그인으로는 한 줄도 못 읽는다.
    * 정책을 anon 까지 열면 링크를 아는 누구나 사내 품번을 보게 된다 — 열지 않는다.
+   *
+   * 화면(app.js)에 로그인 폼이 생겼으므로, 세션도 자격 증명도 없으면
+   * prompt() 팝업으로 다시 묻지 않고 AUTH_REQUIRED 오류를 던진다 —
+   * 화면이 이 오류를 받아 로그인 폼을 보여준다.
+   *
+   * @param {{email:string, password:string}=} credentials  로그인 폼에서 넘겨줄 값
    */
-  function signIn() {
+  function signIn(credentials) {
     return sb.auth.getSession().then(function (res) {
       var session = res && res.data && res.data.session;
       if (session && session.user) { meId = session.user.id; return; }
 
-      var email = root.prompt && root.prompt('Supabase 계정 메일');
-      if (!email) throw new Error('로그인이 필요합니다');
-      var pw = root.prompt && root.prompt('비밀번호');
-      if (!pw) throw new Error('로그인이 필요합니다');
+      var email = credentials && credentials.email;
+      var pw = credentials && credentials.password;
+      if (!email || !pw) {
+        var needAuth = new Error('로그인이 필요합니다');
+        needAuth.code = 'AUTH_REQUIRED';
+        throw needAuth;
+      }
 
       return sb.auth.signInWithPassword({ email: email, password: pw }).then(function (r) {
         if (r.error) throw new Error('로그인 실패: ' + r.error.message);
         meId = r.data.user.id;
       });
     });
+  }
+
+  /** 로그아웃. 세션을 실제로 끊어야 다음 접속 때 다시 로그인 화면이 뜬다. */
+  function signOut() {
+    return (sb && sb.auth) ? sb.auth.signOut() : Promise.resolve();
   }
 
   /* ------------------------------------------------------------ 읽기 */
@@ -537,6 +552,6 @@
     addFiles: addFiles, removeFile: removeFile, logMail: logMail,
     addArchive: addArchive, updateArchive: updateArchive, deleteArchive: deleteArchive,
     setUserStatus: setUserStatus, addUser: addUser,
-    log: log, reset: reset
+    log: log, reset: reset, signOut: signOut
   };
 });
