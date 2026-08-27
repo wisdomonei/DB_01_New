@@ -23,8 +23,56 @@
 <!-- === HD:META:END === -->
 </head>
 <body class="hd hd-app">
+ 
+<!-- ============================ 로그인 화면 ============================ -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+ 
+    <div class="login-brand">
+      <span class="brand-mark">PCT</span>
+      <b>건설기계 표준부품<br>원가계산서 작업관리</b>
+    </div>
+ 
+    <section class="card login-form-side">
+      <h1>로그인</h1>
+      <p class="sub">등록된 메일로 로그인하세요.</p>
+ 
+      <form id="loginForm" class="form-grid login-form-grid" autocomplete="off">
+        <label>메일<input type="email" name="email" placeholder="name@hd.example.com" required></label>
+        <label>비밀번호<input type="password" name="password" placeholder="데모 모드는 아무 값" required></label>
+        <div class="form-actions">
+          <button type="submit" class="btn primary">로그인</button>
+          <span class="form-msg" id="loginMsg"></span>
+        </div>
+      </form>
+ 
+      <p class="login-signup-note">
+        협력업체 작업 수행자이신가요?
+        <button type="button" class="btn small ghost" id="btnShowSignup">외부 인원 가입 신청</button>
+      </p>
+ 
+      <div class="login-signup-panel hidden" id="signupPanel">
+        <form id="loginSignupForm" class="form-grid" autocomplete="off">
+          <label>이름<input type="text" name="name" required></label>
+          <label>메일<input type="email" name="email" required></label>
+          <label class="wide">소속<input type="text" name="org" placeholder="협력업체명"></label>
+          <label>역할<select name="role"><option>작업 수행자</option><option>작업 요청자</option></select></label>
+          <div class="form-actions">
+            <button type="submit" class="btn secondary small">가입 신청</button>
+            <span class="form-msg" id="loginSignupMsg"></span>
+          </div>
+        </form>
+      </div>
+ 
+      <p class="login-demo-hint">
+        데모 계정 예시 — 요청자 <code>jihye.han@hd.example.com</code>
+      </p>
+    </section>
+  </div>
+</div>
 
-<div class="shell">
+<!-- ============================ 본 화면 ============================ -->
+<div class="shell hidden" id="shell">
 
   <!-- ============================ 사이드바 ============================ -->
   <aside class="sidebar" id="sidebar">
