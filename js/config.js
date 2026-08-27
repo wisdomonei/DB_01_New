@@ -21,7 +21,7 @@
 
   root.APP_CONFIG = {
     // 예: 'https://abcdefghijklmnop.supabase.co'
-    SUPABASE_URL: 'sb_publishable_eO0HFMw_MHVWcMko8imtIA_eieOxdVu',
+    SUPABASE_URL: 'https://wveqyzklfrozyjgchmwm.supabase.co',
 
     // 예: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'  (anon / public 키)
     SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZXF5emtsZnJvenlqZ2NobXdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2NzQzMTksImV4cCI6MjEwMzI1MDMxOX0.WPvl5oIr7TpFUD-hImYqxtq4Fe0RNjicYH2IPcYURWE',
@@ -35,7 +35,7 @@
      *
      * 커밋하지 않고 잠깐 확인만 하려면 주소 뒤에 ?supabase=1 을 붙이면 됩니다.
      */
-    USE_SUPABASE: false
+    USE_SUPABASE: True
   };
 
   // 주소로 임시 전환 — 스키마를 올린 직후 커밋 없이 확인할 때
