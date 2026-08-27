@@ -35,7 +35,7 @@
      *
      * 커밋하지 않고 잠깐 확인만 하려면 주소 뒤에 ?supabase=1 을 붙이면 됩니다.
      */
-    USE_SUPABASE: True
+    USE_SUPABASE: true
   };
 
   // 주소로 임시 전환 — 스키마를 올린 직후 커밋 없이 확인할 때
