@@ -1189,19 +1189,26 @@
   function wireLogin() {
     $('#loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      var f = new FormData(this);
-      var res = tryLogin(f.get('email'));
       var msg = $('#loginMsg');
-      if (!res.ok) {
-        msg.textContent = res.reason;
+      try {
+        var f = new FormData(this);
+        var res = tryLogin(f.get('email'));
+        if (!res.ok) {
+          msg.textContent = res.reason;
+          msg.className = 'form-msg bad';
+          return;
+        }
+        msg.textContent = '';
+        msg.className = 'form-msg';
+        saveSession(res.user.id);
+        showShell();
+        enterApp();
+      } catch (err) {
+        // 원인을 화면에 바로 보여준다 — 콘솔을 열지 않아도 무엇이 문제인지 알 수 있게.
+        console.error('로그인 처리 중 오류:', err);
+        msg.textContent = '오류: ' + (err && err.message ? err.message : String(err));
         msg.className = 'form-msg bad';
-        return;
       }
-      msg.textContent = '';
-      msg.className = 'form-msg';
-      saveSession(res.user.id);
-      showShell();
-      enterApp();
     });
 
     $('#btnShowSignup').addEventListener('click', function () {
@@ -1285,20 +1292,35 @@
     });
   }
 
+  function showBootError(err) {
+    console.error('초기화 중 오류:', err);
+    var msg = document.getElementById('loginMsg');
+    var screen = document.getElementById('loginScreen');
+    if (screen) screen.classList.remove('hidden');
+    if (msg) {
+      msg.textContent = '초기화 오류: ' + (err && err.message ? err.message : String(err));
+      msg.className = 'form-msg bad';
+    }
+  }
+
   function boot() {
-    wireLogin();
+    try {
+      wireLogin();
 
-    // 이 브라우저에서 이미 로그인해 있고, 그 계정이 여전히 승인 상태면 바로 들여보낸다.
-    var savedId = readSession();
-    var savedUser = savedId ? DB.user(savedId) : null;
+      // 이 브라우저에서 이미 로그인해 있고, 그 계정이 여전히 승인 상태면 바로 들여보낸다.
+      var savedId = readSession();
+      var savedUser = savedId ? DB.user(savedId) : null;
 
-    if (savedUser && savedUser.status === L.ACCOUNT.APPROVED) {
-      DB.setCurrentUser(savedUser.id);
-      showShell();
-      enterApp();
-    } else {
-      clearSession();
-      showLogin();
+      if (savedUser && savedUser.status === L.ACCOUNT.APPROVED) {
+        DB.setCurrentUser(savedUser.id);
+        showShell();
+        enterApp();
+      } else {
+        clearSession();
+        showLogin();
+      }
+    } catch (err) {
+      showBootError(err);
     }
   }
 
