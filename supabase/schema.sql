@@ -424,7 +424,7 @@ $grants$;
 --   Supabase Auth 로 본인 계정을 만든 뒤, 그 사용자의 uuid 로 아래를 한 번 실행하면
 --   관리자가 됩니다. uuid 는 Dashboard → Authentication → Users 에서 복사합니다.
 --
---   insert into public.app_user (id, name, email, org, role, status)
---   values ('<auth.users.id>', '홍길동', 'me@example.com', '원가기획팀', '관리자', '승인')
---   on conflict (id) do update set role = '관리자', status = '승인';
+insert into public.app_user (id, name, email, org, role, status)
+values ('ecfa35e7-57d6-4ddf-8f7e-1e50649648d7', '한지혜', 'jihyehan@hd.com', '원가기획팀', '관리자', '승인')
+on conflict (id) do update set role = '관리자', status = '승인';
 -- ----------------------------------------------------------------------------
