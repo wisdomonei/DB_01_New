@@ -1152,8 +1152,8 @@
 
   /* ============================================================== 로그인 */
 
-  /** 메일만으로 통과시키는 데모 로그인. 승인된 계정만 들어올 수 있다. */
-  function tryLogin(email) {
+  /** 데모 모드 — 메일만으로 통과시킨다. 승인된 계정만 들어올 수 있다. */
+  function tryLoginLocal(email) {
     email = String(email || '').trim().toLowerCase();
     if (!email) return { ok: false, reason: '메일을 입력하세요' };
     var u = DB.users().filter(function (x) {
@@ -1176,6 +1176,8 @@
     $('#shell').classList.remove('hidden');
   }
 
+  // 세션 유지는 데모 모드에서만 이걸로 한다. Supabase 모드는 supabase-js 가
+  // 자기 세션을 알아서 저장·복원하므로 여기서 따로 손대지 않는다.
   function saveSession(userId) {
     try { root.sessionStorage.setItem('pct_authed_user', userId); } catch (e) { /* 무시 */ }
   }
@@ -1186,13 +1188,57 @@
     try { root.sessionStorage.removeItem('pct_authed_user'); } catch (e) { /* 무시 */ }
   }
 
+  function applySupabaseMode() {
+    DB = root.SupabaseStore;
+    $('#modeChip').textContent = 'Supabase 모드';
+    $('#modeChip').style.borderColor = 'var(--accent)';
+    // 서버 모드에서는 로그인한 사람이 곧 나다. 전환·초기화 단추를 남겨 두면
+    // 눌러도 아무 일이 없어 "고장났나" 로 읽힌다.
+    $('.who-switch').classList.add('hidden');
+    $('#btnReset').classList.add('hidden');
+    $('.demo-banner').innerHTML =
+      '<b>Supabase 모드입니다.</b> 이 화면의 자료는 본인 Supabase 프로젝트에 저장되며, ' +
+      '누가 무엇을 보고 바꿀 수 있는지는 <b>RLS 정책</b>이 정합니다. ' +
+      '파일 본문은 데이터베이스에 넣지 않고 이름·크기·버전만 기록합니다.';
+  }
+
+  /** 로그인(또는 세션 복원) 성공 뒤, 두 모드 공통으로 화면을 채운다. */
+  function finishEnteringApp() {
+    fillUserSwitch();
+    presetForm();
+    wire();
+    // 사본 유무를 알아야 [받기] 칸을 제대로 그린다. 받아 온 뒤 첫 화면을 그린다.
+    refreshCopies(function () { go('dashboard'); });
+  }
+
   function wireLogin() {
     $('#loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var msg = $('#loginMsg');
+      var f = new FormData(this);
+      var email = f.get('email');
+      var password = f.get('password');
+      var cfg = root.APP_CONFIG || {};
+
+      if (cfg.USE_SUPABASE && root.SupabaseStore) {
+        msg.textContent = '확인 중…';
+        msg.className = 'form-msg';
+        root.SupabaseStore.init(undefined, { email: email, password: password })
+          .then(function () {
+            applySupabaseMode();
+            showShell();
+            finishEnteringApp();
+          })
+          .catch(function (err) {
+            console.error('Supabase 로그인 실패:', err);
+            msg.textContent = err && err.message ? err.message : '로그인에 실패했습니다';
+            msg.className = 'form-msg bad';
+          });
+        return;
+      }
+
       try {
-        var f = new FormData(this);
-        var res = tryLogin(f.get('email'));
+        var res = tryLoginLocal(email);
         if (!res.ok) {
           msg.textContent = res.reason;
           msg.className = 'form-msg bad';
@@ -1202,7 +1248,7 @@
         msg.className = 'form-msg';
         saveSession(res.user.id);
         showShell();
-        enterApp();
+        finishEnteringApp();
       } catch (err) {
         // 원인을 화면에 바로 보여준다 — 콘솔을 열지 않아도 무엇이 문제인지 알 수 있게.
         console.error('로그인 처리 중 오류:', err);
@@ -1215,10 +1261,15 @@
       $('#signupPanel').classList.toggle('hidden');
     });
 
+    // 이 가입 신청 폼은 데모 모드용이다. Supabase 모드에서는 각자 Supabase Auth 로
+    // 가입해야 하므로(계정 생성 자체가 인증 절차다), 그 안내만 그대로 보여준다 —
+    // DB.addUser 가 서버 모드에서는 이미 그 안내 문구를 반환하도록 되어 있다.
     $('#loginSignupForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = new FormData(this);
-      var res = DB.addUser({
+      var cfg = root.APP_CONFIG || {};
+      var target = (cfg.USE_SUPABASE && root.SupabaseStore) ? root.SupabaseStore : DB;
+      var res = target.addUser({
         name: f.get('name'), email: f.get('email'), org: f.get('org'), role: f.get('role')
       });
       var msg = $('#loginSignupMsg');
@@ -1227,6 +1278,16 @@
         : res.reason;
       msg.className = 'form-msg' + (res.ok ? '' : ' bad');
       if (res.ok) this.reset();
+    });
+
+    $('#btnLogout').addEventListener('click', function () {
+      var cfg = root.APP_CONFIG || {};
+      if (cfg.USE_SUPABASE && root.SupabaseStore && root.SupabaseStore.signOut) {
+        root.SupabaseStore.signOut().then(function () { root.location.reload(); });
+      } else {
+        clearSession();
+        root.location.reload();
+      }
     });
   }
 
@@ -1254,44 +1315,6 @@
     if (u && u.email) f.querySelector('[name=requesterEmail]').value = u.email;
   }
 
-  /** 로그인 성공 뒤에만 실행한다 — 예전 boot() 의 본체를 그대로 옮긴 것. */
-  function enterApp() {
-    // 서버 모드 — config.js 에 값이 채워져 있고 스키마가 올라가 있으면 갈아 끼운다.
-    var cfg = root.APP_CONFIG || {};
-    var ready = Promise.resolve(false);
-    if (cfg.USE_SUPABASE && root.SupabaseStore) ready = root.SupabaseStore.init();
-
-    ready.then(function (on) {
-      if (on) {
-        DB = root.SupabaseStore;
-        $('#modeChip').textContent = 'Supabase 모드';
-        $('#modeChip').style.borderColor = 'var(--accent)';
-        // 서버 모드에서는 로그인한 사람이 곧 나다. 전환·초기화 단추를 남겨 두면
-        // 눌러도 아무 일이 없어 "고장났나" 로 읽힌다.
-        $('.who-switch').classList.add('hidden');
-        $('#btnReset').classList.add('hidden');
-        $('.demo-banner').innerHTML =
-          '<b>Supabase 모드입니다.</b> 이 화면의 자료는 본인 Supabase 프로젝트에 저장되며, ' +
-          '누가 무엇을 보고 바꿀 수 있는지는 <b>RLS 정책</b>이 정합니다. ' +
-          '파일 본문은 데이터베이스에 넣지 않고 이름·크기·버전만 기록합니다.';
-      }
-    }).catch(function (e) {
-      // 스키마를 아직 안 올렸을 때가 대부분이다. 화면이 죽는 것보다 데모로 내려가는 편이 낫다.
-      console.warn('Supabase 연결 실패 — 데모 모드로 계속합니다:', e && e.message);
-      toast('Supabase 연결에 실패해 데모 모드로 엽니다', true);
-    }).then(function () {
-      fillUserSwitch();
-      presetForm();
-      wire();
-      $('#btnLogout').addEventListener('click', function () {
-        clearSession();
-        showLogin();
-      });
-      // 사본 유무를 알아야 [받기] 칸을 제대로 그린다. 받아 온 뒤 첫 화면을 그린다.
-      refreshCopies(function () { go('dashboard'); });
-    });
-  }
-
   function showBootError(err) {
     console.error('초기화 중 오류:', err);
     var msg = document.getElementById('loginMsg');
@@ -1306,15 +1329,41 @@
   function boot() {
     try {
       wireLogin();
+      var cfg = root.APP_CONFIG || {};
 
-      // 이 브라우저에서 이미 로그인해 있고, 그 계정이 여전히 승인 상태면 바로 들여보낸다.
+      if (cfg.USE_SUPABASE && root.SupabaseStore) {
+        // Supabase 모드 — 이미 로그인 세션이 남아 있으면(재접속) 조용히 이어서 들어간다.
+        // 세션이 없으면 AUTH_REQUIRED 로 실패하는데, 이건 오류가 아니라 정상적으로
+        // 로그인 화면을 보여줘야 하는 상태다.
+        root.SupabaseStore.init().then(function (on) {
+          if (on) {
+            applySupabaseMode();
+            showShell();
+            finishEnteringApp();
+          } else {
+            showLogin();
+          }
+        }).catch(function (err) {
+          if (err && err.code === 'AUTH_REQUIRED') {
+            showLogin();
+            return;
+          }
+          console.error('Supabase 연결 실패:', err);
+          showLogin();
+          var msg = $('#loginMsg');
+          msg.textContent = 'Supabase 연결 오류: ' + (err && err.message ? err.message : String(err));
+          msg.className = 'form-msg bad';
+        });
+        return;
+      }
+
+      // 데모 모드 — 이 브라우저에 이미 로그인해 있고 그 계정이 여전히 승인 상태면 바로 들여보낸다.
       var savedId = readSession();
       var savedUser = savedId ? DB.user(savedId) : null;
-
       if (savedUser && savedUser.status === L.ACCOUNT.APPROVED) {
         DB.setCurrentUser(savedUser.id);
         showShell();
-        enterApp();
+        finishEnteringApp();
       } else {
         clearSession();
         showLogin();
