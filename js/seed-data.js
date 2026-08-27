@@ -15,7 +15,7 @@
   'use strict';
   return {
   "users": [
-    {"id":"U-R1","name":"한지혜","email":"hanjihye@hd.example.com","org":"원가기획팀","role":"작업 요청자","status":"승인","joinedOff":-360},
+    {"id":"U-R1","name":"한지혜","email":"jihyehan@hd.example.com","org":"원가기획팀","role":"작업 요청자","status":"승인","joinedOff":-360},
     {"id":"U-R2","name":"김도현","email":"kimdohyun@hd.example.com","org":"원가기획팀","role":"작업 요청자","status":"승인","joinedOff":-368},
     {"id":"U-R3","name":"박서연","email":"parkseoyeon@hd.example.com","org":"원가기획팀","role":"작업 요청자","status":"승인","joinedOff":-377},
     {"id":"U-R4","name":"이준호","email":"leejunho@hd.example.com","org":"제품개발팀","role":"작업 요청자","status":"승인","joinedOff":-305},
