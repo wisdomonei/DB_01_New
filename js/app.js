@@ -1150,6 +1150,79 @@
     render();
   }
 
+  /* ============================================================== 로그인 */
+
+  /** 메일만으로 통과시키는 데모 로그인. 승인된 계정만 들어올 수 있다. */
+  function tryLogin(email) {
+    email = String(email || '').trim().toLowerCase();
+    if (!email) return { ok: false, reason: '메일을 입력하세요' };
+    var u = DB.users().filter(function (x) {
+      return String(x.email || '').toLowerCase() === email;
+    })[0];
+    if (!u) return { ok: false, reason: '등록된 메일이 아닙니다' };
+    if (u.status === L.ACCOUNT.PENDING) return { ok: false, reason: '아직 승인 대기 중입니다' };
+    if (u.status === L.ACCOUNT.REJECTED) return { ok: false, reason: '가입이 반려된 계정입니다' };
+    DB.setCurrentUser(u.id);
+    return { ok: true, user: u };
+  }
+
+  function showLogin() {
+    $('#shell').classList.add('hidden');
+    $('#loginScreen').classList.remove('hidden');
+  }
+
+  function showShell() {
+    $('#loginScreen').classList.add('hidden');
+    $('#shell').classList.remove('hidden');
+  }
+
+  function saveSession(userId) {
+    try { root.sessionStorage.setItem('pct_authed_user', userId); } catch (e) { /* 무시 */ }
+  }
+  function readSession() {
+    try { return root.sessionStorage.getItem('pct_authed_user'); } catch (e) { return null; }
+  }
+  function clearSession() {
+    try { root.sessionStorage.removeItem('pct_authed_user'); } catch (e) { /* 무시 */ }
+  }
+
+  function wireLogin() {
+    $('#loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = new FormData(this);
+      var res = tryLogin(f.get('email'));
+      var msg = $('#loginMsg');
+      if (!res.ok) {
+        msg.textContent = res.reason;
+        msg.className = 'form-msg bad';
+        return;
+      }
+      msg.textContent = '';
+      msg.className = 'form-msg';
+      saveSession(res.user.id);
+      showShell();
+      enterApp();
+    });
+
+    $('#btnShowSignup').addEventListener('click', function () {
+      $('#signupPanel').classList.toggle('hidden');
+    });
+
+    $('#loginSignupForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = new FormData(this);
+      var res = DB.addUser({
+        name: f.get('name'), email: f.get('email'), org: f.get('org'), role: f.get('role')
+      });
+      var msg = $('#loginSignupMsg');
+      msg.textContent = res.ok
+        ? '신청 완료 — 관리자 승인 후 사용할 수 있습니다'
+        : res.reason;
+      msg.className = 'form-msg' + (res.ok ? '' : ' bad');
+      if (res.ok) this.reset();
+    });
+  }
+
   /* ============================================================== 시작 */
 
   function fillUserSwitch() {
@@ -1174,7 +1247,8 @@
     if (u && u.email) f.querySelector('[name=requesterEmail]').value = u.email;
   }
 
-  function boot() {
+  /** 로그인 성공 뒤에만 실행한다 — 예전 boot() 의 본체를 그대로 옮긴 것. */
+  function enterApp() {
     // 서버 모드 — config.js 에 값이 채워져 있고 스키마가 올라가 있으면 갈아 끼운다.
     var cfg = root.APP_CONFIG || {};
     var ready = Promise.resolve(false);
@@ -1202,9 +1276,30 @@
       fillUserSwitch();
       presetForm();
       wire();
+      $('#btnLogout').addEventListener('click', function () {
+        clearSession();
+        showLogin();
+      });
       // 사본 유무를 알아야 [받기] 칸을 제대로 그린다. 받아 온 뒤 첫 화면을 그린다.
       refreshCopies(function () { go('dashboard'); });
     });
+  }
+
+  function boot() {
+    wireLogin();
+
+    // 이 브라우저에서 이미 로그인해 있고, 그 계정이 여전히 승인 상태면 바로 들여보낸다.
+    var savedId = readSession();
+    var savedUser = savedId ? DB.user(savedId) : null;
+
+    if (savedUser && savedUser.status === L.ACCOUNT.APPROVED) {
+      DB.setCurrentUser(savedUser.id);
+      showShell();
+      enterApp();
+    } else {
+      clearSession();
+      showLogin();
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
