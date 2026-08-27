@@ -282,6 +282,14 @@ html, body { margin: 0; padding: 0; }
   font-size: 11.5px; color: var(--hd-ink-3); white-space: normal; max-width: 460px;
 }
 
+/* 이 브라우저가 들고 있는 사본 — 용량은 눈에 보여야 관리된다 */
+.copy-usage {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  margin-top: 12px; padding: 10px 12px;
+  background: var(--hd-surface-2); border: 1px solid var(--hd-line-soft);
+  border-radius: var(--hd-r); font-size: 12.5px;
+}
+
 /* 표 아래 "더 보기" — 164행을 한 번에 뿌리면 스크롤로 아무것도 못 찾는다 */
 .more-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
 .more-row .muted { font-size: 12.5px; }
