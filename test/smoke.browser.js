@@ -1,167 +1,245 @@
 /**
- * 서버 모드 어댑터 테스트 — node test/server.test.js
+ * 화면 연기 테스트 — node test/smoke.browser.js  (playwright 필요)
  *
- * js/supabase-store.js 가 js/store.js 와 **같은 모양**으로 동작하는지,
- * 그리고 서버가 거절했을 때 화면이 앞서 나간 채로 남지 않는지 본다.
- * 진짜 Postgres 검증은 scripts/sqltest/run.sh 가 따로 한다.
+ * 규칙 테스트가 전부 통과해도 app.js 의 오타 하나로 페이지가 빈 화면이 될 수 있다.
+ * 여기서는 실제로 브라우저에 띄워 **일곱 화면이 그려지는지**와
+ * **권한 경계가 화면에서도 지켜지는지**만 본다. 계산은 다른 테스트가 본다.
+ *
+ * 브라우저가 없으면(로컬에 playwright 미설치) 조용히 건너뛴다 —
+ * 이 하나 때문에 `node test/*.test.js` 가 막히면 아무도 안 돌린다.
  */
 'use strict';
 
-var Logic = require('../js/logic.js');
-var Store = require('../js/store.js');
-var Adapter = require('../js/supabase-store.js');
-var Fake = require('./fake-supabase.js');
+var http = require('http');
+var fs = require('fs');
+var path = require('path');
+
+var ROOT = path.join(__dirname, '..');
+var PORT = 8791;
+
+var TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml'
+};
 
 var pass = 0, fail = 0;
-function eq(a, b, label) {
-  var x = JSON.stringify(a), y = JSON.stringify(b);
-  if (x === y) pass++;
-  else { fail++; console.error('  ✗ ' + label + '\n      기대: ' + y + '\n      실제: ' + x); }
+function ok(cond, label) {
+  if (cond) { pass++; }
+  else { fail++; console.error('  ✗ ' + label); }
 }
-function ok(c, label) { eq(!!c, true, label); }
-function group(n) { console.log('\n' + n); }
-function flush() { return new Promise(function (r) { setTimeout(r, 0); }); }
+function eq(a, b, label) {
+  if (JSON.stringify(a) === JSON.stringify(b)) pass++;
+  else { fail++; console.error('  ✗ ' + label + '\n      기대: ' + JSON.stringify(b) + '\n      실제: ' + JSON.stringify(a)); }
+}
 
-var REQ = '00000000-0000-0000-0000-000000000001';
-var WORKER = '00000000-0000-0000-0000-000000000002';
+var chromium;
+try {
+  chromium = require('playwright').chromium;
+} catch (e) {
+  console.log('playwright 가 없어 화면 연기 테스트를 건너뜁니다 ' +
+              '(CI 에서는 설치 후 돌립니다).');
+  process.exit(0);
+}
 
-var shouted = [];
-global.PCT_TOAST = function (m) { shouted.push(m); };
-
-var fake = Fake.makeFake({
-  uid: REQ,
-  app_user: [
-    { id: REQ, name: '한지혜', email: 'req@example.com', org: '원가기획팀',
-      role: '작업 요청자', status: '승인', joined_at: '2026-01-02' },
-    { id: WORKER, name: '정민수', email: 'w1@example.com', org: '다원기술',
-      role: '작업 수행자', status: '승인', joined_at: '2026-02-02' }
-  ],
-  request: [], deliverable: [], archive_doc: []
+var server = http.createServer(function (req, res) {
+  var rel = decodeURIComponent(req.url.split('?')[0]);
+  if (rel === '/') rel = '/index.html';
+  var file = path.join(ROOT, rel);
+  // 저장소 밖으로 나가는 경로는 거절한다
+  if (file.indexOf(ROOT) !== 0 || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    res.writeHead(404); res.end('not found'); return;
+  }
+  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });
+  fs.createReadStream(file).pipe(res);
 });
 
-(async function () {
+var VIEWS = ['dashboard', 'requests', 'work', 'files', 'review', 'db', 'users'];
 
-  /* ------------------------------------------------------------ 접속 */
-  group('1. 접속과 초기 적재');
-
-  var on = await Adapter.init(fake);
-  ok(on, '가짜 클라이언트로 서버 모드에 올라간다');
-  eq(Adapter.currentUser().name, '한지혜', '로그인한 사람이 곧 나다');
-  eq(Adapter.setCurrentUser('아무개').id, REQ, '서버 모드에는 계정 전환이 없다');
-
-  // Store 와 같은 함수를 내놓아야 app.js 가 갈아 끼울 수 있다
-  var missing = Object.keys(Store).filter(function (k) {
-    return typeof Store[k] === 'function' && typeof Adapter[k] !== 'function';
-  }).filter(function (k) { return k !== '_seed'; });
-  eq(missing, [], '어댑터가 Store 의 함수를 빠짐없이 내놓는다');
-
-  /* ------------------------------------------------------------ 등록 */
-  group('2. 요청 등록');
-
-  var bad = Adapter.addRequest({
-    partNo: '123456-100001', partName: '붐 실린더 브라켓', model: 'HX220L',
-    requestedAt: Adapter.today(), dueDate: '2000-01-01', requesterEmail: 'req@example.com'
+server.listen(PORT, '127.0.0.1', function () {
+  run().then(function () {
+    server.close();
+    console.log('\n' + (fail ? '✗ ' : '✓ ') + pass + ' 통과 / ' + fail + ' 실패');
+    process.exit(fail ? 1 : 0);
+  }).catch(function (e) {
+    server.close();
+    console.error(e);
+    process.exit(1);
   });
-  ok(!bad.ok, '규칙 위반은 서버에 가기 전에 걸린다');
-  eq(fake._tables.request.length, 0, '거절된 요청은 서버로 나가지 않는다');
-
-  var made = Adapter.addRequest({
-    partNo: '123456 100001', partName: '붐 실린더 브라켓', model: 'HX220L',
-    requestedAt: Adapter.today(), dueDate: Adapter.offToDate(10),
-    requesterEmail: 'req@example.com'
-  });
-  ok(made.ok, '정상 요청은 통과한다');
-  await flush();
-  eq(fake._tables.request.length, 1, '서버에 한 줄 들어갔다');
-  eq(fake._tables.request[0].part_no, '123456-100001', '품번이 정규화되어 나간다');
-  eq(fake._tables.request[0].status, '요청', '처음 상태는 요청');
-
-  var RID = made.request.id;
-
-  /* ------------------------------------------------------------ 흐름 */
-  group('3. 요청 → 수행 → 제출');
-
-  ok(!Adapter.setStatus(RID, '완료').ok, '요청에서 완료로 건너뛸 수 없다');
-  ok(Adapter.assign(RID, WORKER).ok, '수행자 배정');
-  await flush();
-  eq(fake._tables.request[0].assignee_id, WORKER, '배정이 서버에 반영된다');
-
-  ok(Adapter.setStatus(RID, '작업중').ok, '요청자도 착수 처리할 수 있다');
-  await flush();
-  eq(fake._tables.request[0].status, '작업중', '서버 상태도 작업중');
-
-  ok(!Adapter.setStatus(RID, '검토/수정').ok, '산출물 없이 검토로 못 넘어간다');
-
-  var up = Adapter.addFiles(RID, [{ name: 'a.xlsx', size: 100 }, { name: 'b.xlsx', size: 200 }]);
-  ok(up.ok, '초안 2건 업로드');
-  await flush();
-  eq(fake._tables.deliverable.map(function (d) { return d.version; }), [1, 2],
-     '버전은 서버 트리거가 매긴다');
-  eq(Adapter.deliverables(RID).map(function (f) { return f.version; }), [1, 2],
-     '서버가 매긴 버전이 화면 쪽 사본에도 들어온다');
-
-  ok(Adapter.setStatus(RID, '검토/수정').ok, '산출물이 있으면 검토로 넘어간다');
-  await flush();
-  eq(fake._tables.request[0].submitted_at, Adapter.today(), '제출일이 서버에 기록된다');
-
-  var rev = Adapter.addFiles(RID, [{ name: '수정본.xlsx', size: 300 }]);
-  eq(rev.kind, '수정본', '검토 단계에서 요청자가 올리면 수정본');
-  await flush();
-  eq(fake._tables.deliverable.filter(function (d) { return d.kind === '수정본'; })[0].version, 1,
-     '수정본은 v1부터 — 초안 v2를 덮지 않는다');
-  eq(fake._tables.deliverable.length, 3, '초안 2건이 그대로 남아 있다');
-
-  ok(!Adapter.setStatus(RID, '작업중').ok, '사유 없이 되돌릴 수 없다');
-  ok(Adapter.setStatus(RID, '완료').ok, '요청자가 완료 처리');
-  await flush();
-  eq(fake._tables.request[0].closed_at, Adapter.today(), '완료일이 서버에 기록된다');
-
-  /* -------------------------------------------------- 서버가 거절할 때 */
-  group('4. 서버가 거절하면 화면을 되돌린다');
-
-  shouted.length = 0;
-  fake._deny('request:update', 'new row violates row-level security policy');
-  ok(Adapter.setStatus(RID, '검토/수정', null, '설계 변경').ok,
-     '규칙상 가능한 요청이라 화면에서는 일단 통과한다');
-  await flush(); await flush();
-
-  ok(shouted.length > 0, '서버 거절을 조용히 넘기지 않고 알린다');
-  ok(shouted[0].indexOf('row-level security') >= 0, '거절 사유를 그대로 전한다');
-  eq(Adapter.request(RID).status, '완료',
-     '서버에서 다시 읽어 화면이 서버보다 앞서 나간 상태를 되돌린다');
-  fake._allow('request:update');
-
-  /* ------------------------------------------------------------ 권한 */
-  group('5. 권한');
-
-  ok(!Adapter.setUserStatus(WORKER, '거절').ok, '요청자는 계정 승인을 바꿀 수 없다');
-  ok(!Adapter.addUser({ name: 'x', email: 'x@y.z' }).ok,
-     '서버 모드에서는 남의 계정을 대신 만들 수 없다');
-
-  /* ------------------------------------------------------- 보관 자료 */
-  group('6. Database 관리');
-
-  var arch = Adapter.addArchive([
-    { name: '부품원가계산서_123456-100001_20150103.xlsx', size: 100 },
-    { name: '스캔본.pdf', size: 50 }
-  ], 'Teams 공유폴더');
-  eq(arch.added, 2, '2건 등록');
-  eq(arch.needCheck, 1, '못 읽은 1건은 확인 대상');
-  await flush();
-  eq(fake._tables.archive_doc[0].doc_date, '2015-01-03', '해독한 일자가 서버로 나간다');
-  eq(fake._tables.archive_doc[1].doc_date, null, '못 읽은 일자를 지어내지 않는다');
-  eq(fake._tables.archive_doc[1].confirmed, false, '확신이 없으면 확인됨으로 두지 않는다');
-
-  /* ------------------------------------------------------------ 이력 */
-  group('7. 활동 이력');
-
-  var actions = fake._tables.activity_log.map(function (r) { return r.action; });
-  ok(actions.indexOf('요청 등록') >= 0, '요청 등록이 서버 이력에 남는다');
-  ok(actions.indexOf('초안 업로드') >= 0, '업로드가 서버 이력에 남는다');
-
-  console.log('\n' + (fail ? '✗ ' : '✓ ') + pass + ' 통과 / ' + fail + ' 실패');
-  process.exit(fail ? 1 : 0);
-})().catch(function (e) {
-  console.error(e);
-  process.exit(1);
 });
+
+async function run() {
+  // CI 는 `npx playwright install chromium` 으로 받은 것을 그대로 쓴다.
+  // 브라우저를 따로 깔아 둔 환경(사내망·컨테이너)에서는 경로를 넘길 수 있게 둔다.
+  var launch = {};
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE) {
+    launch.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  }
+  var browser = await chromium.launch(launch);
+  // acceptDownloads 가 없으면 내려받기 검사에서 아무 일도 일어나지 않는다
+  var ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+  var page = await ctx.newPage();
+
+  var errors = [];
+  page.on('pageerror', function (e) { errors.push(String(e.message)); });
+  page.on('console', function (m) {
+    // 폰트 CDN 이 막힌 망에서도 화면은 떠야 한다 — 네트워크 실패는 세지 않는다
+    if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text());
+  });
+
+  await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+
+  console.log('\n1. 대시보드');
+  eq(errors, [], '자바스크립트 오류 없이 뜬다');
+  ok((await page.locator('#kpiRow .kpi').count()) === 4, 'KPI 카드 4장');
+  ok((await page.locator('#donut svg circle').count()) > 1, '도넛이 그려진다');
+  ok((await page.locator('#trend svg path').count()) >= 2, '꺾은선이 그려진다');
+  eq(await page.locator('#process li').count(), 5, '프로세스 5단계');
+  ok((await page.locator('#recentTable tbody tr').count()) > 0, '최근 요청 목록에 행이 있다');
+  ok((await page.locator('#logTable tbody tr').count()) > 0, '활동 이력에 행이 있다');
+
+  console.log('\n2. 일곱 화면이 모두 그려진다');
+  for (var i = 0; i < VIEWS.length; i++) {
+    var v = VIEWS[i];
+    await page.click('.nav-item[data-view="' + v + '"]');
+    await page.waitForTimeout(150);
+    ok(await page.locator('#view-' + v).isVisible(), v + ' 화면이 보인다');
+  }
+  eq(errors, [], '화면을 옮겨 다녀도 오류가 없다');
+
+  console.log('\n3. 표 행이 접혀 두 배 높이가 되지 않는다');
+  await page.click('.nav-item[data-view="requests"]');
+  await page.waitForTimeout(300);
+  var tall = await page.evaluate(function () {
+    return [].slice.call(document.querySelectorAll('#reqTable tbody tr'))
+      .filter(function (r) { return r.getBoundingClientRect().height > 60; }).length;
+  });
+  eq(tall, 0, '모든 행이 한 줄 높이다 (공통 테마의 .warn 여백에 걸리지 않는다)');
+  ok((await page.locator('#reqTable tbody tr').count()) <= 50, '한 번에 50행까지만 그린다');
+  ok(await page.locator('[data-more="req"]').isVisible(), '"더 보기" 가 남은 건수를 알린다');
+
+  console.log('\n4. 신규 요청 등록');
+  await page.fill('#reqForm [name=partNo]', '123456 100999');
+  await page.fill('#reqForm [name=partName]', '연기 테스트 부품');
+  await page.fill('#reqForm [name=model]', 'HX220L');
+  await page.click('#reqForm button[type=submit]');
+  await page.waitForTimeout(300);
+  ok(/등록 완료/.test(await page.textContent('#reqFormMsg')), '요청이 등록된다');
+
+  // 희망완료일을 요청일보다 앞으로 두면 막혀야 한다
+  await page.fill('#reqForm [name=partNo]', '123456 100998');
+  await page.fill('#reqForm [name=partName]', '거절 테스트');
+  await page.fill('#reqForm [name=model]', 'HX220L');
+  await page.fill('#reqForm [name=dueDate]', '2000-01-01');
+  await page.click('#reqForm button[type=submit]');
+  await page.waitForTimeout(300);
+  ok(await page.locator('#reqErrors').isVisible(), '규칙 위반은 사유가 화면에 뜬다');
+
+  console.log('\n5. 권한 — 수행자에게는 검토/수정이 열리지 않는다');
+  await page.selectOption('#userSwitch', { label: '정민수 — 작업 수행자' });
+  await page.waitForTimeout(300);
+  await page.click('.nav-item[data-view="review"]');
+  await page.waitForTimeout(250);
+  ok(await page.locator('#reviewDenied').isVisible(), '접근 불가 안내가 뜬다');
+  ok(!(await page.locator('#reviewPanel').isVisible()), '검토 목록은 그려지지 않는다');
+
+  await page.click('.nav-item[data-view="requests"]');
+  await page.waitForTimeout(250);
+  ok(!(await page.locator('#newRequestCard').isVisible()), '수행자에게는 등록 폼이 없다');
+
+  console.log('\n6. 올린 파일을 다시 내려받을 수 있다');
+  await uploadAndDownload();
+
+  console.log('\n7. 좁은 화면에서 가로로 넘치지 않는다');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  var overflow = await page.evaluate(function () {
+    return document.documentElement.scrollWidth > window.innerWidth + 1;
+  });
+  eq(overflow, false, '390px 에서 본문이 가로로 밀리지 않는다');
+
+  eq(errors, [], '끝까지 자바스크립트 오류가 없다');
+  await browser.close();
+
+  /**
+   * 업로드 → 사본 보관 → 내려받기 한 바퀴.
+   *
+   * 서버에는 본문을 넣지 않으므로, 내려받기가 되려면 이 브라우저에 사본이 있어야 한다.
+   * 그 사슬이 한 군데라도 끊기면 "올렸는데 받을 수 없는" 상태가 되는데,
+   * 화면은 멀쩡해 보인다 — 실제로 받아 봐야 알 수 있다.
+   *
+   * ⚠ 파일 경로는 ASCII 로 둔다. 한글 이름 경로는 setInputFiles 가 조용히
+   *   빈 채로 넘어가, 앱이 아니라 테스트가 틀린다(그 자리에서 한 번 속았다).
+   */
+  async function uploadAndDownload() {
+    var os = require('os');
+    var tmp = path.join(os.tmpdir(), 'pct-smoke-upload.csv');
+    var body = '품번,품명,표준원가\n123456-100001,붐 실린더 브라켓,128400\n';
+    fs.writeFileSync(tmp, body, 'utf8');
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto('http://127.0.0.1:' + PORT + '/index.html', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(500);
+    await page.click('.nav-item[data-view="work"]');
+    await page.waitForTimeout(400);
+
+    // 초안을 올릴 수 있는 건(작업중 + 배정됨)을 찾는다
+    var opened = false;
+    var rows = await page.locator('#workTable tbody tr').count();
+    for (var i = 0; i < rows && !opened; i++) {
+      var row = page.locator('#workTable tbody tr').nth(i);
+      if ((await row.innerText()).indexOf('작업중') < 0) continue;
+      await row.locator('button[data-open]').click();
+      await page.waitForTimeout(350);
+      opened = (await page.locator('#dFiles').count()) > 0;
+      if (!opened) await page.click('.modal-head [data-close]');
+    }
+    ok(opened, '초안을 올릴 수 있는 건이 있다');
+    if (!opened) return;
+
+    await page.setInputFiles('#dFiles', tmp);
+    var picked = await page.evaluate(function () {
+      return document.getElementById('dFiles').files.length;
+    });
+    eq(picked, 1, '파일이 입력칸에 담겼다');
+
+    await page.click('#dUpload');
+    await page.waitForTimeout(900);
+    var msg = await page.textContent('#toast');
+    ok(msg.indexOf('등록했습니다') >= 0, '업로드가 받아들여졌다', msg);
+    ok(msg.indexOf('사본') >= 0, '사본을 이 브라우저에 보관했다고 알린다', msg);
+
+    var getBtns = await page.locator('#modalBody [data-get]').count();
+    ok(getBtns >= 1, '올린 파일에 [내려받기] 가 생겼다', getBtns + '개');
+    if (!getBtns) return;
+
+    // 버튼을 눌러도 파일이 안 나오면 여기서 15초를 기다린 뒤 예외로 죽는다.
+    // 그러면 무엇이 틀렸는지가 스택에 묻히므로, 붙잡아서 한 줄로 알린다.
+    var dl = null;
+    try {
+      dl = (await Promise.all([
+        page.waitForEvent('download', { timeout: 15000 }),
+        page.locator('#modalBody [data-get]').first().click()
+      ]))[0];
+    } catch (e) {
+      ok(false, '[내려받기] 를 누르면 파일이 나온다',
+         '15초 안에 내려받기가 시작되지 않았습니다 — 사본 보관이나 저장 경로가 끊겼습니다');
+      return;
+    }
+    eq(dl.suggestedFilename(), 'pct-smoke-upload.csv', '올린 이름 그대로 내려받는다');
+    var got = fs.readFileSync(await dl.path(), 'utf8');
+    eq(got, body, '내려받은 내용이 올린 것과 같다');
+
+    // 사본이 없는 샘플 산출물은 왜 못 받는지 말해야 한다
+    await page.click('.modal-head [data-close]');
+    await page.click('.nav-item[data-view="files"]');
+    await page.waitForTimeout(500);
+    var none = await page.locator('#fileTable tbody tr td .muted').first();
+    ok(await none.count() > 0 ? (await none.getAttribute('title') || '').length > 0 : true,
+       '사본이 없는 파일에는 사유가 붙는다');
+    ok((await page.locator('#copyUsage').innerText()).indexOf('사본') >= 0,
+       '보관 중인 사본 용량을 보여 준다');
+  }
+}

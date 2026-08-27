@@ -33,6 +33,11 @@
     file: { keyword: '', kind: '' },
     arch: { keyword: '', from: '', to: '', needOnly: false },
     trendMonths: 6,
+    // 이 브라우저에 사본이 있는 파일 id — filestore 에 물어 채운다.
+    // 목록을 그릴 때마다 IndexedDB 를 두드리면 화면이 늦어지므로 한 번 받아 들고 있는다.
+    localCopies: {},
+    copyUsage: { count: 0, bytes: 0, on: false },
+    copyQuota: { usage: null, quota: null, persisted: false },
     // 164행을 한 번에 뿌리면 스크롤 말고는 아무것도 못 한다. 50행씩 늘린다.
     limit: { req: 50, file: 50, arch: 50 }
   };
@@ -95,6 +100,35 @@
       Math.min(PAGE, total - shown) + '건 더 보기</button>' +
       '<span class="muted">전체 ' + total + '건 중 ' + shown + '건을 보고 있습니다 — ' +
       '검색으로 좁히면 더 빨리 찾습니다</span></div>';
+  }
+
+  /**
+   * 내려받기 칸.
+   * 사본이 있으면 바로 받고, 없으면 원본 위치로 보내고, 둘 다 없으면 왜 없는지 적는다.
+   * 눌러도 아무 일이 없는 버튼을 두지 않는다 — 고장으로 읽힌다.
+   */
+  function downloadCell(f) {
+    var a = L.downloadAction(f, !!state.localCopies[f.id]);
+    if (a.kind === 'local')
+      return '<button type="button" class="btn small" data-get="' + esc(f.id) + '">' + a.label + '</button>';
+    if (a.kind === 'link')
+      return '<a class="btn small" href="' + esc(a.href) + '" target="_new" rel="noopener noreferrer">' +
+             a.label + '</a>';
+    return '<span class="muted nowrap" title="' + esc(a.reason) + '">' + a.label + '</span>';
+  }
+
+  /** filestore 에 "이 파일들 사본 있니" 를 한 번에 묻고 다시 그린다. */
+  function refreshCopies(afterwards) {
+    var FS = root.FileStore;
+    if (!FS || !FS.available()) { if (afterwards) afterwards(); return; }
+    var ids = DB.files().map(function (f) { return f.id; })
+      .concat(DB.archive().map(function (a) { return a.id; }));
+    Promise.all([FS.has(ids), FS.usage(), FS.estimate()]).then(function (r) {
+      state.localCopies = r[0];
+      state.copyUsage = r[1];
+      state.copyQuota = r[2];
+      if (afterwards) afterwards(); else render();
+    });
   }
 
   function emptyRow(cols, msg) {
@@ -406,9 +440,10 @@
     }).sort(function (a, b) { return String(b.uploadedAt).localeCompare(String(a.uploadedAt)); });
 
     $('#fileCount').textContent = fs.length + '개';
+    renderCopyUsage();
     var shown = fs.slice(0, state.limit.file);
     table('#fileTable',
-      ['요청번호', '품번', '품명', '파일명', '종류', '버전', '크기', '올린 사람', '등록일', ''],
+      ['요청번호', '품번', '품명', '파일명', '종류', '버전', '크기', '올린 사람', '등록일', '받기', ''],
       shown.map(function (f) {
         var r = byId[f.requestId];
         return '<tr><td class="id">' + esc(f.requestId) + '</td>' +
@@ -420,6 +455,7 @@
           '<td class="num">' + L.humanSize(f.size) + '</td>' +
           '<td>' + esc(nameOf(f.uploaderId)) + '</td>' +
           '<td class="nowrap">' + esc(f.uploadedAt) + '</td>' +
+          '<td class="nowrap">' + downloadCell(f) + '</td>' +
           '<td><button type="button" class="btn small" data-open="' + esc(f.requestId) + '">요청 보기</button></td></tr>';
       }), '조건에 맞는 산출물이 없습니다');
     moreRow('file', shown.length, fs.length);
@@ -432,6 +468,35 @@
           '<td>' + esc(m.to) + '</td>' +
           '<td>' + esc(m.subject) + '</td></tr>';
       }), '발송 이력이 없습니다');
+  }
+
+  /** 이 브라우저가 들고 있는 사본이 얼마나 되는지 — 용량은 눈에 보여야 관리된다. */
+  function renderCopyUsage() {
+    var host = $('#copyUsage');
+    if (!host) return;
+    var FS = root.FileStore;
+    if (!FS || !FS.available()) {
+      host.innerHTML = '<span class="muted">이 브라우저에서는 사본을 둘 수 없습니다 ' +
+        '(사생활 보호 모드이거나 IndexedDB 가 막혀 있습니다). ' +
+        '올린 파일은 이름·크기만 기록되고, 내려받으려면 원본 위치를 등록하세요.</span>';
+      return;
+    }
+    var u = state.copyUsage, q = state.copyQuota;
+    var room = (q.quota != null && q.usage != null)
+      ? ' <span class="muted">· 이 브라우저가 이 사이트에 내준 공간 ' + L.humanSize(q.quota) +
+        ' 중 ' + L.humanSize(q.usage) + ' 사용</span>'
+      : '';
+    host.innerHTML =
+      '<span>이 브라우저에 보관 중인 사본 <b>' + u.count + '개</b> · ' + L.humanSize(u.bytes) + room + '</span>' +
+      (q.persisted
+        ? '<span class="badge ok">영구 보관</span>'
+        : '<span class="badge badge-warn" title="디스크가 빠듯해지면 브라우저가 사본을 비울 수 있습니다">' +
+          '임시 보관</span>') +
+      (u.count ? ' <button type="button" class="btn small" id="btnClearCopies">사본 비우기</button>' : '') +
+      (q.persisted ? '' :
+        '<span class="muted">브라우저가 영구 보관을 아직 허락하지 않았습니다 — ' +
+        '이 페이지를 즐겨찾기에 넣거나 몇 번 더 쓰면 대개 허용됩니다. ' +
+        '중요한 파일은 원본을 따로 보관하세요.</span>');
   }
 
   /* ------------------------------------------------------ 검토/수정 관리 */
@@ -485,7 +550,7 @@
 
     var shown = rows.slice(0, state.limit.arch);
     table('#archTable',
-      ['파일명', '품번', '모델', '문서일자', '버전', '해독', '보관 위치', '등록일', ''],
+      ['파일명', '품번', '모델', '문서일자', '버전', '해독', '보관 위치', '등록일', '받기', ''],
       shown.map(function (a) {
         return '<tr><td class="wrap">' + esc(a.name) +
             (a.hints && a.hints.length && !a.confirmed
@@ -497,6 +562,7 @@
           '<td class="conf-' + a.confidence + ' nowrap">' + confLabel(a.confidence) + '</td>' +
           '<td>' + esc(a.source) + '</td>' +
           '<td class="nowrap">' + esc(a.registeredAt) + '</td>' +
+          '<td class="nowrap">' + downloadCell(a) + '</td>' +
           '<td class="nowrap">' + (a.confirmed
             ? '<span class="badge ok">확인됨</span>'
             : '<button type="button" class="btn small" data-arch-fix="' + esc(a.id) + '">보정</button>' +
@@ -613,7 +679,7 @@
     /* --- 산출물 --- */
     html += '<h4>산출물 ' + fs.length + '개</h4>';
     html += '<div class="tablewrap"><table class="tbl"><thead><tr>' +
-      ['파일명', '종류', '버전', '크기', '올린 사람', '등록일', ''].map(function (h) { return '<th>' + h + '</th>'; }).join('') +
+      ['파일명', '종류', '버전', '크기', '올린 사람', '등록일', '받기', ''].map(function (h) { return '<th>' + h + '</th>'; }).join('') +
       '</tr></thead><tbody>' +
       (fs.length ? fs.map(function (f) {
         var mine = u && (u.role === L.ROLE.ADMIN || f.uploaderId === u.id);
@@ -623,19 +689,29 @@
           '<td class="num">' + L.humanSize(f.size) + '</td>' +
           '<td>' + esc(nameOf(f.uploaderId)) + '</td>' +
           '<td class="nowrap">' + esc(f.uploadedAt) + '</td>' +
+          '<td class="nowrap">' + downloadCell(f) + '</td>' +
           '<td>' + (mine ? '<button type="button" class="btn small danger" data-delfile="' + esc(f.id) + '">삭제</button>' : '') + '</td></tr>';
-      }).join('') : emptyRow(7, '아직 올라온 산출물이 없습니다')) +
+      }).join('') : emptyRow(8, '아직 올라온 산출물이 없습니다')) +
       '</tbody></table></div>';
 
     /* --- 업로드 --- */
     var kind = L.uploadKind(u, r);
     if (kind) {
+      var canCopy = root.FileStore && root.FileStore.available();
       html += '<h4>' + kind + ' 올리기 <span class="muted">품번 1건에 여러 파일을 한 번에</span></h4>' +
         '<div class="act-row">' +
         '<input type="file" id="dFiles" multiple>' +
+        '<label>원본 위치 <span class="muted">(선택 · Teams·SharePoint 주소)</span>' +
+        '<input type="url" id="dLink" placeholder="https://…" style="min-width:260px"></label>' +
         '<button type="button" class="btn primary" id="dUpload">' + kind + ' 등록</button>' +
         '</div>' +
-        '<p class="note">파일 본문은 저장하지 않습니다 — 이름 · 크기 · 버전만 기록됩니다.' +
+        '<p class="note">' +
+        (canCopy
+          ? '파일은 <b>이 브라우저 안에</b> 보관됩니다(한 개 ' + L.humanSize(L.COPY_LIMIT.perFile) +
+            ' 까지). 올린 뒤 목록에서 바로 내려받을 수 있습니다. ' +
+            '서버로는 나가지 않으므로 <b>다른 PC 에서는 보이지 않습니다</b> — ' +
+            '원본이 Teams 에 있다면 <b>원본 위치</b>도 함께 적어 두세요.'
+          : '이 브라우저에서는 사본을 둘 수 없어, 내려받으려면 <b>원본 위치</b>를 적어야 합니다.') +
         (kind === '수정본'
           ? ' 수행자 초안은 그대로 두고 <b>수정본 v' + L.nextVersion(DB.files(), r.id, '수정본') + '</b> 으로 쌓입니다.'
           : '') + '</p>';
@@ -764,9 +840,30 @@
 
       var del = t.closest('[data-delfile]');
       if (del) {
-        var res = DB.removeFile(del.dataset.delfile);
-        toast(res.ok ? '산출물을 삭제했습니다' : res.reason, !res.ok);
-        renderDetail(); render(); return;
+        var fid = del.dataset.delfile;
+        var res = DB.removeFile(fid);
+        if (!res.ok) { toast(res.reason, true); return; }
+        // 표에서 지운 파일의 사본을 남겨 두면 용량만 먹고 아무도 못 찾는다
+        var FS = root.FileStore;
+        (FS && FS.available() ? FS.remove(fid) : Promise.resolve()).then(function () {
+          toast('산출물을 삭제했습니다');
+          refreshCopies(function () { renderDetail(); render(); });
+        });
+        return;
+      }
+
+      // 내려받기
+      var get = t.closest('[data-get]');
+      if (get) { doDownload(get.dataset.get); return; }
+
+      if (t.id === 'btnClearCopies') {
+        if (!root.confirm('이 브라우저에 보관 중인 파일 사본을 모두 지웁니다.\n' +
+                          '표의 기록은 그대로 남고, 원본 위치가 없는 파일은 내려받을 수 없게 됩니다. 계속할까요?')) return;
+        root.FileStore.clear().then(function () {
+          toast('사본을 비웠습니다');
+          refreshCopies();
+        });
+        return;
       }
 
       if (t.id === 'dUpload') return doUpload();
@@ -789,12 +886,16 @@
       toast(me().name + ' (' + me().role + ') 로 전환했습니다');
     });
     $('#btnReset').addEventListener('click', function () {
-      if (!root.confirm('브라우저에 저장된 데모 데이터를 지우고 처음 상태로 되돌립니다. 계속할까요?')) return;
+      if (!root.confirm('브라우저에 저장된 데모 데이터를 지웁니다.\n' +
+                        '올린 파일의 사본도 함께 지워집니다. 계속할까요?')) return;
       DB.reset();
-      fillUserSwitch();
-      closeDetail();
-      render();
-      toast('데모 데이터를 초기화했습니다');
+      var FS = root.FileStore;
+      (FS && FS.available() ? FS.clear() : Promise.resolve()).then(function () {
+        fillUserSwitch();
+        closeDetail();
+        refreshCopies(function () { render(); });
+        toast('데모 데이터를 초기화했습니다');
+      });
     });
 
     /* 신규 요청 */
@@ -891,11 +992,15 @@
       if (!p) return;
       var res = DB.addArchive(p.picked, $('#archiveSource').value);
       if (!res.ok) { toast(res.reason, true); return; }
+      var picked = p.picked;
       state.archivePreview = null;
       $('#archiveFile').value = '';
       renderArchivePreview();
-      render();
-      toast(res.added + '건 등록 — 확인 필요 ' + res.needCheck + '건');
+      keepCopies(res.rows, picked, function (kept) {
+        toast(res.added + '건 등록 — 확인 필요 ' + res.needCheck + '건' +
+              (kept ? ' · 사본 ' + kept + '건 보관' : ''));
+        refreshCopies();
+      });
     });
 
     function bind(sel, group, key, ev) {
@@ -915,10 +1020,71 @@
 
   function doUpload() {
     var picked = $('#dFiles') ? [].slice.call($('#dFiles').files || []) : [];
-    var res = DB.addFiles(state.detailId, picked);
+    var link = $('#dLink') ? $('#dLink').value.trim() : '';
+
+    // 저장소에는 메타데이터만 넘긴다. 본문은 아래에서 이 브라우저에만 둔다.
+    var res = DB.addFiles(state.detailId, picked.map(function (f) {
+      return { name: f.name, size: f.size, link: link };
+    }));
     if (!res.ok) { toast(res.reason, true); return; }
-    toast(res.kind + ' ' + res.added + '건을 등록했습니다');
-    renderDetail(); render();
+
+    keepCopies(res.files, picked, function (kept, skipped) {
+      var msg = res.kind + ' ' + res.added + '건을 등록했습니다';
+      if (kept) msg += ' · 사본 ' + kept + '건 보관';
+      if (skipped) msg += ' · ' + skipped + '건은 사본 없이';
+      toast(msg);
+      refreshCopies(function () { renderDetail(); render(); });
+    });
+  }
+
+  /**
+   * 올린 파일의 본문을 이 브라우저에 둔다.
+   * 한도를 넘는 건은 두지 않고 그 사실을 알린다 — 조용히 빠지면
+   * 나중에 [사본 없음] 을 보고 고장으로 읽는다.
+   */
+  function keepCopies(rows, picked, done) {
+    var FS = root.FileStore;
+    if (!FS || !FS.available() || !rows || !rows.length) { done(0, 0); return; }
+
+    // 이 브라우저가 사본을 함부로 비우지 못하게 표시를 건다.
+    // 로컬에서만 쓰는 시스템이라 브라우저가 비우면 그대로 자료 유실이다.
+    // 사용자 조작(업로드) 직후여야 브라우저가 요청을 받아 준다.
+    FS.requestPersist();
+
+    var used = state.copyUsage.bytes || 0;
+    var jobs = [], skipped = 0;
+    rows.forEach(function (row, i) {
+      var blob = picked[i];
+      if (!blob) { skipped++; return; }
+      var v = L.canKeepLocalCopy(blob.size, used);
+      if (!v.ok) { skipped++; toast(blob.name + ': ' + v.reason, true); return; }
+      used += blob.size;
+      jobs.push(FS.put(row.id, blob));
+    });
+    Promise.all(jobs).then(function (r) {
+      done(r.filter(Boolean).length, skipped);
+    });
+  }
+
+  /** 사본을 꺼내 브라우저에 저장시킨다. */
+  function doDownload(fileId) {
+    var FS = root.FileStore;
+    var f = DB.files().filter(function (x) { return x.id === fileId; })[0]
+         || DB.archive().filter(function (x) { return x.id === fileId; })[0];
+    if (!f) { toast('파일을 찾을 수 없습니다', true); return; }
+    if (!FS || !FS.available()) { toast('이 브라우저에서는 사본을 쓸 수 없습니다', true); return; }
+
+    FS.get(fileId).then(function (blob) {
+      if (!blob) {
+        // 목록을 그린 뒤에 사본이 사라졌을 수 있다(다른 탭에서 비웠다든지)
+        toast('이 브라우저에 사본이 없습니다', true);
+        refreshCopies();
+        return;
+      }
+      FS.saveAs(blob, f.name);
+      DB.log('산출물 내려받기', f.requestId || '', f.name);
+      toast(f.name + ' 을(를) 내려받습니다');
+    });
   }
 
   function doAssign() {
@@ -1036,7 +1202,8 @@
       fillUserSwitch();
       presetForm();
       wire();
-      go('dashboard');
+      // 사본 유무를 알아야 [받기] 칸을 제대로 그린다. 받아 온 뒤 첫 화면을 그린다.
+      refreshCopies(function () { go('dashboard'); });
     });
   }
 

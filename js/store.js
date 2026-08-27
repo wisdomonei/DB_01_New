@@ -353,20 +353,29 @@
     var list = [].slice.call(picked || []).filter(function (f) { return f && f.name; });
     if (!list.length) return { ok: false, reason: '파일을 고르세요', added: 0 };
 
+    // 원본 위치는 화면에서 href 로 쓰인다. http(s) 가 아니면 받지 않는다.
+    var bad = list.filter(function (f) {
+      return String(f.link || '').trim() && !Logic.isSafeLink(f.link);
+    })[0];
+    if (bad) return { ok: false, added: 0, reason: '원본 위치는 http:// 또는 https:// 주소여야 합니다' };
+
     var db = load();
-    var n = 0;
+    var made = [];
     list.forEach(function (f) {
-      db.files.push({
+      var row = {
         id: 'F-' + (db.files.length + 1 + Math.floor(Math.random() * 1e6)),
         requestId: requestId, name: f.name, size: f.size || 0,
         kind: kind, version: Logic.nextVersion(db.files, requestId, kind),
-        uploaderId: me ? me.id : null, uploadedAt: today(), link: f.link || ''
-      });
-      n++;
+        uploaderId: me ? me.id : null, uploadedAt: today(),
+        link: String(f.link || '').trim()
+      };
+      db.files.push(row);
+      made.push(row);
     });
     save();
-    log(kind + ' 업로드', requestId, n + '건');
-    return { ok: true, reason: '', added: n, kind: kind };
+    log(kind + ' 업로드', requestId, made.length + '건');
+    // 만들어진 행을 돌려준다 — 화면이 이 id 로 본문 사본을 보관한다(js/filestore.js)
+    return { ok: true, reason: '', added: made.length, kind: kind, files: made };
   }
 
   function removeFile(fileId, actor) {

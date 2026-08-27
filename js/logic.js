@@ -266,7 +266,8 @@
     var b = Number(bytes) || 0;
     if (b < 1024) return b + ' B';
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
-    return (b / 1024 / 1024).toFixed(1) + ' MB';
+    if (b < 1024 * 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+    return (b / 1024 / 1024 / 1024).toFixed(1) + ' GB';
   }
 
   /* ============================================================== 일정 판정 */
@@ -432,6 +433,61 @@
     if (req.status === STATUS.WORK && (req.assigneeId === user.id || owner)) return FILE_KIND.DRAFT;
     if (req.status === STATUS.REVIEW && owner) return FILE_KIND.REVISION;
     return null;
+  }
+
+  /* ================================================= 파일 본문 보관·내려받기 */
+
+  /**
+   * 서버에는 파일 본문을 넣지 않는다 (README 「용량과 권한」).
+   * 그런데 그것만으로는 **올린 파일에 다시 닿을 방법이 없다.**
+   * 그래서 두 갈래를 둔다.
+   *   · 이 브라우저에 사본을 둔다 (IndexedDB) → 바로 내려받는다
+   *   · 원본이 Teams·SharePoint 에 있으면 그 주소(link)를 적어 둔다 → 그리로 보낸다
+   * 서버가 본문을 들지 않는다는 원칙은 그대로다. 사본은 각자 브라우저 안에만 있다.
+   *
+   * 무한정 담으면 브라우저가 막히므로 한도를 둔다.
+   * 부품원가계산서 한 건이 보통 수 MB 이므로 한 개 25MB / 전체 300MB 로 잡았다.
+   */
+  var COPY_LIMIT = {
+    perFile: 25 * 1024 * 1024,        // 한 개 25MB — 이보다 큰 원가계산서는 거의 없다
+    total: 2 * 1024 * 1024 * 1024     // 전체 2GB — 진짜 한도는 브라우저가 정한다(quota)
+  };
+
+  function canKeepLocalCopy(size, usedBytes, limit) {
+    limit = limit || COPY_LIMIT;
+    var s = Number(size) || 0;
+    if (s <= 0) return { ok: false, reason: '빈 파일입니다' };
+    if (s > limit.perFile)
+      return { ok: false, reason: '한 개 ' + humanSize(limit.perFile) + ' 를 넘어 사본을 두지 않습니다' };
+    if ((Number(usedBytes) || 0) + s > limit.total)
+      return { ok: false, reason: '이 브라우저 보관 한도(' + humanSize(limit.total) + ')를 넘습니다' };
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * 원본 위치로 쓸 수 있는 주소인가.
+   * href 에 그대로 넣을 값이라 http(s) 만 받는다 —
+   * `javascript:` 를 넣으면 목록을 여는 사람의 브라우저에서 그 코드가 돈다.
+   */
+  function isSafeLink(url) {
+    return /^https?:\/\//i.test(String(url == null ? '' : url).trim());
+  }
+
+  /**
+   * 이 파일을 어떻게 내려받게 할 것인가.
+   *   'local' — 이 브라우저에 사본이 있다. 바로 내려받는다
+   *   'link'  — 사본은 없지만 원본 위치가 있다. 그리로 보낸다
+   *   'none'  — 둘 다 없다. 왜 없는지 알려 준다 (버튼을 그냥 죽여 두지 않는다)
+   */
+  function downloadAction(file, hasLocal) {
+    if (hasLocal) return { kind: 'local', label: '내려받기', reason: '' };
+    var link = file && file.link;
+    if (isSafeLink(link)) return { kind: 'link', label: '원본 위치', href: String(link).trim(), reason: '' };
+    if (String(link || '').trim())
+      return { kind: 'none', label: '사본 없음',
+               reason: '원본 위치가 http(s) 주소가 아닙니다: ' + String(link).trim() };
+    return { kind: 'none', label: '사본 없음',
+             reason: '이 브라우저에 사본이 없고 원본 위치도 등록되지 않았습니다' };
   }
 
   /* ============================================================== 메일 */
@@ -650,6 +706,9 @@
     canManageUsers: canManageUsers, canEditRequest: canEditRequest, uploadKind: uploadKind,
 
     buildCompletionMail: buildCompletionMail, mailtoUrl: mailtoUrl,
+
+    COPY_LIMIT: COPY_LIMIT, canKeepLocalCopy: canKeepLocalCopy,
+    isSafeLink: isSafeLink, downloadAction: downloadAction,
 
     parseArchiveName: parseArchiveName, parseArchiveBatch: parseArchiveBatch,
     archiveSearch: archiveSearch

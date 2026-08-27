@@ -86,7 +86,7 @@
       <b>샘플 데이터입니다.</b>
       품번·품명·모델명은 건설기계 부품 체계를 흉내 낸 것이고, 사람 이름과 업체는 전부 가공입니다.
       사내 실데이터는 이 저장소에 들어 있지 않습니다.
-      <b>업로드한 파일은 이름·크기만 기록되고 본문은 어디에도 저장되지 않습니다.</b>
+      <b>올린 파일은 이 브라우저 안에만 보관됩니다</b> — 서버로는 이름·크기·버전만 갑니다.
     </div>
 
     <!-- ======================= 대시보드 ======================= -->
@@ -214,8 +214,13 @@
         </div>
         <div class="tablewrap"><table class="tbl" id="fileTable"></table></div>
         <div id="more-file"></div>
-        <p class="note">파일 본문은 저장하지 않습니다. 이 표에 남는 것은 이름·크기·버전·올린 사람이며,
-          원본은 Teams 공유 폴더(또는 Supabase Storage)에 그대로 둡니다 — README 「용량과 권한」 참조.</p>
+        <div class="copy-usage" id="copyUsage"></div>
+        <p class="note"><b>올린 파일은 이 브라우저 안에 보관되고, 목록에서 바로 내려받습니다.</b>
+          서버로는 나가지 않습니다 — 부품원가계산서 한 건이 수 MB 이고 품번마다 여러 버전이 쌓이므로,
+          본문을 서버가 끌어안는 설계는 몇 달 안에 막힙니다 (README 「용량과 권한」).<br>
+          그래서 <b>다른 PC 에서는 보이지 않습니다.</b> 여럿이 함께 받아야 하는 파일은
+          원본을 Teams 공유 폴더에 두고 <b>원본 위치</b>를 등록하세요 — 그 주소로 연결됩니다.
+          샘플 데이터의 산출물은 실제 파일이 없어 <b>사본 없음</b>으로 표시됩니다. 직접 올려 보시면 받아집니다.</p>
       </section>
 
       <section class="card">
@@ -330,6 +335,7 @@
 <script src="js/logic.js"></script>
 <script src="js/seed-data.js"></script>
 <script src="js/store.js"></script>
+<script src="js/filestore.js"></script>
 <script src="js/supabase-store.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/app.js"></script>

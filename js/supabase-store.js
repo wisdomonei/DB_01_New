@@ -354,17 +354,31 @@
     var list = [].slice.call(picked || []).filter(function (f) { return f && f.name; });
     if (!list.length) return { ok: false, reason: '파일을 고르세요', added: 0 };
 
+    // 원본 위치는 화면에서 href 로 쓰인다. http(s) 가 아니면 받지 않는다.
+    var bad = list.filter(function (f) {
+      return String(f.link || '').trim() && !Logic.isSafeLink(f.link);
+    })[0];
+    if (bad) return { ok: false, added: 0, reason: '원본 위치는 http:// 또는 https:// 주소여야 합니다' };
+
     // 버전은 서버 트리거가 매긴다. 여기서 매기면 두 사람이 동시에 올릴 때 같은 번호가 나온다.
     var rows = list.map(function (f) {
       return { request_id: requestId, name: f.name, size_bytes: f.size || 0,
-               kind: kind, uploader_id: me.id, link: f.link || '' };
+               kind: kind, uploader_id: me.id, link: String(f.link || '').trim() };
     });
+    var made = [];
     sb.from('deliverable').insert(rows).select().then(function (res) {
       if (res.error) { rejected('산출물 등록', res.error); return; }
-      (res.data || []).forEach(function (row) { db.files.push(fromFile(row)); });
+      (res.data || []).forEach(function (row) {
+        var mapped = fromFile(row);
+        db.files.push(mapped);
+        made.push(mapped);
+      });
       log(kind + ' 업로드', requestId, rows.length + '건');
     });
-    return { ok: true, reason: '', added: rows.length, kind: kind };
+    // 서버가 id 를 매기므로 여기서는 아직 행이 없다.
+    // 사본 보관은 화면이 addFiles 가 돌려준 files 로 하는데, 서버 모드에서는
+    // 그 배열이 조금 뒤에 채워진다 — 그래서 같은 배열을 돌려준다(참조).
+    return { ok: true, reason: '', added: rows.length, kind: kind, files: made };
   }
 
   function removeFile(fileId, actor) {
