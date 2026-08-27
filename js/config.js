@@ -21,10 +21,10 @@
 
   root.APP_CONFIG = {
     // 예: 'https://abcdefghijklmnop.supabase.co'
-    SUPABASE_URL: '',
+    SUPABASE_URL: 'sb_publishable_eO0HFMw_MHVWcMko8imtIA_eieOxdVu',
 
     // 예: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'  (anon / public 키)
-    SUPABASE_ANON_KEY: '',
+    SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZXF5emtsZnJvenlqZ2NobXdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc2NzQzMTksImV4cCI6MjEwMzI1MDMxOX0.WPvl5oIr7TpFUD-hImYqxtq4Fe0RNjicYH2IPcYURWE',
 
     /**
      * 서버 모드로 쓸지.
